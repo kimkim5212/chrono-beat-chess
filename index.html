@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHRONO-BEAT CHESS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Orbitron', 'Noto Sans JP', sans-serif;
+            background-color: #020617; /* Slate-950 */
+            color: #fff;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(14, 165, 233, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.08), transparent 25%);
+        }
+        .neon-text-cyan { text-shadow: 0 0 5px #0ea5e9, 0 0 15px #0ea5e9; }
+        .neon-text-green { text-shadow: 0 0 5px #10b981, 0 0 15px #10b981; }
+        .neon-text-red { text-shadow: 0 0 5px #f43f5e, 0 0 15px #f43f5e; }
+        .neon-border-cyan { 
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.4), inset 0 0 10px rgba(14, 165, 233, 0.2); 
+            border: 1px solid #0ea5e9; 
+        }
+        .neon-border-green {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4), inset 0 0 10px rgba(16, 185, 129, 0.2); 
+            border: 1px solid #10b981;
+        }
+        
+        .overlay {
+            position: absolute; inset: 0; background: rgba(2, 6, 23, 0.90);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50;
+            backdrop-filter: blur(8px);
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="w-screen h-screen flex items-center justify-center">
+
+    <div id="game-wrapper" class="flex flex-row gap-8 p-6 rounded-2xl neon-border-cyan bg-slate-900/60 shadow-2xl relative">
+        
+        <!-- 左側: チェス盤 -->
+        <div class="relative w-[500px] h-[500px] bg-slate-950 rounded-lg overflow-hidden border border-slate-700 shadow-[0_0_20px_rgba(0,0,0,0.8)]">
+            <canvas id="chessCanvas" width="500" height="500"></canvas>
+            
+            <!-- APバー -->
+            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 w-11/12 h-6 bg-slate-900 rounded-full border border-green-500 overflow-hidden flex items-center shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                <div id="ap-fill" class="h-full bg-green-400 transition-all duration-100 ease-out" style="width: 0%; box-shadow: 0 0 10px #10b981;"></div>
+                <span id="ap-text" class="absolute left-1/2 -translate-x-1/2 text-xs font-bold text-white drop-shadow-[0_1px_2px_#000]">AP: 0 / 300</span>
+            </div>
+        </div>
+
+        <!-- 右側: UI & リズムゲーム -->
+        <div class="flex flex-col w-[280px] gap-4">
+            
+            <!-- スコア & コンボ表示 -->
+            <div class="bg-slate-950 border border-cyan-500 rounded-lg p-3 text-center shadow-[0_0_10px_rgba(14,165,233,0.3)]">
+                <div class="text-cyan-400 text-xs font-bold tracking-widest">COMBO</div>
+                <div id="combo-text" class="text-5xl font-black neon-text-cyan my-1">0</div>
+                <div id="bonus-text" class="text-xs text-green-400 font-bold">+0% AP ボーナス</div>
+            </div>
+
+            <!-- リズムキャンバス (1レーン) -->
+            <div class="flex-1 bg-slate-950 border border-slate-700 rounded-lg relative overflow-hidden flex justify-center">
+                <canvas id="rhythmCanvas" width="160" height="450" class="h-full"></canvas>
+                <div id="judgement-text" class="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black opacity-0 transition-opacity duration-100 pointer-events-none"></div>
+            </div>
+            
+            <div class="text-center text-slate-500 text-sm mt-2">
+                [SPACE] リズム入力<br>
+                [ESC] ポーズメニュー
+            </div>
+        </div>
+    </div>
+
+    <!-- タイトル画面 -->
+    <div id="title-overlay" class="overlay">
+        <h1 class="text-7xl font-black mb-2 neon-text-cyan text-center tracking-[0.2em]">CHRONO-BEAT</h1>
+        <h2 class="text-5xl font-black mb-12 neon-text-green text-center tracking-[0.4em]">CHESS</h2>
+        
+        <div class="flex flex-col items-center gap-8">
+            <div class="flex flex-col items-center gap-4 bg-slate-950/80 p-6 rounded-xl border border-slate-800">
+                
+                <!-- BPM設定 -->
+                <div class="flex items-center justify-between w-full gap-4">
+                    <label class="text-cyan-400 font-bold tracking-widest uppercase text-sm w-24 text-right">BPM</label>
+                    <select id="bpm-select" class="bg-slate-900 text-white font-bold py-2 px-4 rounded border border-cyan-500/50 outline-none cursor-pointer text-center shadow-[0_0_10px_rgba(14,165,233,0.2)] focus:border-cyan-400 w-48">
+                        <option value="60">60 - SLOW</option>
+                        <option value="90">90 - MID</option>
+                        <option value="120" selected>120 - FAST</option>
+                        <option value="150">150 - RUSH</option>
+                        <option value="custom">カスタム</option>
+                    </select>
+                </div>
+                <input type="number" id="custom-bpm-input" min="40" max="300" placeholder="40-300" class="hidden bg-slate-900 text-white font-bold py-2 px-4 rounded border border-cyan-500/50 outline-none text-center shadow-[0_0_10px_rgba(14,165,233,0.2)] focus:border-cyan-400 w-48 self-end">
+
+                <!-- 難易度設定 -->
+                <div class="flex items-center justify-between w-full gap-4 mt-2">
+                    <label class="text-green-400 font-bold tracking-widest uppercase text-sm w-24 text-right">LEVEL</label>
+                    <select id="difficulty-select" class="bg-slate-900 text-white font-bold py-2 px-4 rounded border border-green-500/50 outline-none cursor-pointer text-center shadow-[0_0_10px_rgba(16,185,129,0.2)] focus:border-green-400 w-48">
+                        <option value="0.8">弱 (SPEED 80%)</option>
+                        <option value="1.0" selected>普 (SPEED 100%)</option>
+                        <option value="1.2">強 (SPEED 120%)</option>
+                    </select>
+                </div>
+
+            </div>
+            
+            <button id="start-btn" class="bg-transparent hover:bg-cyan-900/50 text-cyan-300 font-black text-2xl py-3 px-16 rounded border-2 border-cyan-500 neon-border-cyan transition-all transform hover:scale-105 active:scale-95 tracking-widest uppercase mt-4">
+                START
+            </button>
+        </div>
+    </div>
+
+    <!-- ポーズ画面 -->
+    <div id="pause-overlay" class="overlay hidden">
+        <h2 class="text-5xl font-black mb-10 text-white tracking-widest drop-shadow-[0_0_10px_#fff]">PAUSE</h2>
+        
+        <div class="flex flex-col gap-4 w-64">
+            <button id="resume-btn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg neon-border-green transition hover:scale-105">
+                再開
+            </button>
+            <button id="retry-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-6 rounded-lg border border-slate-500 transition hover:scale-105">
+                やり直す
+            </button>
+            <button id="title-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-6 rounded-lg border border-slate-600 transition hover:scale-105">
+                タイトルに戻る
+            </button>
+        </div>
+    </div>
+
+    <!-- リザルト画面 -->
+    <div id="result-overlay" class="overlay hidden">
+        <h2 id="result-title" class="text-6xl font-black mb-6"></h2>
+        <button id="result-title-btn" class="mt-8 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-lg border border-slate-500 transition">
+            タイトルに戻る
+        </button>
+    </div>
+
+    <script>
+        const PIECE_COSTS = { 'P': 30, 'K': 50, 'N': 90, 'B': 90, 'R': 120, 'Q': 180 };
+        // Base cooldowns for 120 BPM.
+        const ENEMY_BASE_COOLDOWNS = { 'p': 3, 'n': 5, 'b': 5, 'r': 10, 'q': 10, 'k': 8 };
+        const UNICODE_PIECES = {
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔',
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚'
+        };
+
+        const gameState = {
+            isRunning: false,
+            isPaused: false,
+            bpm: 120,
+            difficulty: 1.0, // 敵のゲージ増加速度倍率
+            ap: 0,
+            maxAp: 300,
+            combo: 0
+        };
+
+        class SoundManager {
+            constructor() {
+                this.ctx = null;
+                this.bpm = 120;
+                this.beatInterval = 0.5;
+                this.nextNoteTime = 0;
+            }
+
+            init(bpm) {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended' && !gameState.isPaused) {
+                    this.ctx.resume();
+                }
+                this.bpm = bpm;
+                this.beatInterval = 60.0 / this.bpm;
+                this.nextNoteTime = this.ctx.currentTime + 0.1;
+            }
+
+            suspend() {
+                if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
+            }
+
+            resume() {
+                if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+            }
+
+            getCurrentTime() {
+                return this.ctx ? this.ctx.currentTime : 0;
+            }
+
+            scheduleBeats(onBeatScheduled) {
+                if (!this.ctx || this.ctx.state !== 'running') return;
+                
+                // 少し先までビートをスケジュール（2.0秒先までスケジュールし、ノーツを画面上部から出現させる）
+                while (this.nextNoteTime < this.ctx.currentTime + 2.0) {
+                    this.playMetronomeTick(this.nextNoteTime);
+                    if (onBeatScheduled) onBeatScheduled(this.nextNoteTime);
+                    this.nextNoteTime += this.beatInterval;
+                }
+            }
+
+            playMetronomeTick(time) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, time);
+                osc.frequency.exponentialRampToValueAtTime(100, time + 0.05);
+                
+                gain.gain.setValueAtTime(0.3, time);
+                gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(time);
+                osc.stop(time + 0.05);
+            }
+
+            playSfx(type) {
+                if (!this.ctx || this.ctx.state !== 'running') return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                if (type === 'capture') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, now);
+                    osc.frequency.exponentialRampToValueAtTime(20, now + 0.2);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (type === 'error') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(150, now);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                }
+            }
+        }
+
+        class RhythmSystem {
+            constructor(canvas, soundMgr) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.sound = soundMgr;
+                
+                this.notes = [];
+                // 判定ラインをレーンの下部(下から80px付近)に設定
+                this.hitLineY = this.canvas.height - 80;
+                // 落下速度
+                this.noteSpeed = 300; // px/sec
+                this.flashIntensity = 0;
+            }
+
+            reset() {
+                this.notes = [];
+                this.flashIntensity = 0;
+            }
+
+            scheduleNote(targetTime) {
+                this.notes.push({ targetTime: targetTime, hit: false, flashed: false });
+            }
+
+            handleInput() {
+                if (!gameState.isRunning || gameState.isPaused) return;
+                const now = this.sound.getCurrentTime();
+                
+                const note = this.notes.find(n => !n.hit && (n.targetTime - now) < 0.2);
+                
+                if (note) {
+                    const diff = Math.abs(note.targetTime - now);
+                    note.hit = true;
+                    
+                    if (diff <= 0.05) { // Perfect
+                        gameState.combo++;
+                        this.addAp(30);
+                        this.showJudgement('PERFECT', 'text-cyan-400');
+                    } else if (diff <= 0.12) { // Good
+                        gameState.combo++;
+                        this.addAp(10);
+                        this.showJudgement('GOOD', 'text-green-400');
+                    } else { // Miss (Early)
+                        gameState.combo = 0;
+                        this.updateUI();
+                        this.showJudgement('MISS', 'text-rose-500');
+                    }
+                } else {
+                    // 空振りペナルティ
+                    gameState.combo = 0;
+                    this.updateUI();
+                }
+            }
+
+            addAp(base) {
+                // 20コンボごとに2%のボーナス
+                const bonusMult = 1.0 + 0.02 * Math.floor(gameState.combo / 20);
+                const gained = Math.floor(base * bonusMult);
+                gameState.ap = Math.min(gameState.maxAp, gameState.ap + gained);
+                this.updateUI();
+            }
+
+            updateUI() {
+                const pct = (gameState.ap / gameState.maxAp) * 100;
+                document.getElementById('ap-fill').style.width = `${pct}%`;
+                document.getElementById('ap-text').innerText = `AP: ${gameState.ap} / ${gameState.maxAp}`;
+                document.getElementById('combo-text').innerText = gameState.combo;
+                const bonus = 2 * Math.floor(gameState.combo / 20);
+                document.getElementById('bonus-text').innerText = `+${bonus}% AP ボーナス`;
+            }
+
+            showJudgement(text, colorClass) {
+                const el = document.getElementById('judgement-text');
+                el.innerText = text;
+                el.className = `absolute top-[60%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black transition-opacity duration-75 pointer-events-none ${colorClass}`;
+                void el.offsetWidth; // Reflow
+                el.style.opacity = 1;
+                setTimeout(() => el.style.opacity = 0, 300);
+            }
+
+            update(deltaTime) {
+                if (gameState.isPaused) return;
+                const now = this.sound.getCurrentTime();
+                
+                if (this.flashIntensity > 0) {
+                    this.flashIntensity -= deltaTime * 5; 
+                    if (this.flashIntensity < 0) this.flashIntensity = 0;
+                }
+
+                for (let i = 0; i < this.notes.length; i++) {
+                    const n = this.notes[i];
+                    
+                    if (now >= n.targetTime && !n.flashed) {
+                        n.flashed = true;
+                        this.flashIntensity = 1.0;
+                    }
+
+                    if (!n.hit && now > n.targetTime + 0.12) {
+                        n.hit = true;
+                        gameState.combo = 0;
+                        this.updateUI();
+                        this.showJudgement('MISS', 'text-rose-500');
+                    }
+                }
+                
+                this.notes = this.notes.filter(n => now < n.targetTime + 0.5);
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                const cx = this.canvas.width / 2;
+                const laneWidth = 80;
+
+                // 背景線
+                this.ctx.strokeStyle = '#1e293b'; // slate-800
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx - laneWidth/2, 0); this.ctx.lineTo(cx - laneWidth/2, this.canvas.height);
+                this.ctx.moveTo(cx + laneWidth/2, 0); this.ctx.lineTo(cx + laneWidth/2, this.canvas.height);
+                this.ctx.stroke();
+
+                // 判定ライン
+                const flashAlpha = Math.max(0, this.flashIntensity);
+                this.ctx.strokeStyle = `rgba(14, 165, 233, ${0.4 + flashAlpha * 0.6})`;
+                this.ctx.lineWidth = 4 + (flashAlpha * 4);
+                this.ctx.shadowBlur = flashAlpha * 20;
+                this.ctx.shadowColor = '#0ea5e9';
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx - laneWidth/2 - 10, this.hitLineY);
+                this.ctx.lineTo(cx + laneWidth/2 + 10, this.hitLineY);
+                this.ctx.stroke();
+                this.ctx.shadowBlur = 0;
+
+                this.ctx.fillStyle = '#475569'; // slate-600
+                this.ctx.font = 'bold 16px Orbitron';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('[SPACE]', cx, this.hitLineY + 35);
+
+                // ノーツ
+                const now = this.sound.getCurrentTime();
+                this.notes.forEach(n => {
+                    if (n.hit) return;
+                    const timeDiff = n.targetTime - now;
+                    const y = this.hitLineY - (timeDiff * this.noteSpeed);
+                    
+                    if (y > -50 && y < this.canvas.height + 50) {
+                        this.ctx.fillStyle = '#10b981';
+                        this.ctx.shadowBlur = 10;
+                        this.ctx.shadowColor = '#10b981';
+                        this.ctx.fillRect(cx - laneWidth/2 + 5, y - 10, laneWidth - 10, 20);
+                        this.ctx.shadowBlur = 0;
+                    }
+                });
+            }
+        }
+
+        class ChessSystem {
+            constructor(canvas, soundMgr) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.sound = soundMgr;
+                this.tileSize = 100;
+                this.pieces = [];
+                
+                this.draggedPiece = null;
+                this.dragPos = { x: 0, y: 0 };
+                this.bindEvents();
+            }
+
+            initBoard() {
+                const layout = [
+                    ['r','n','b','q','k'],
+                    ['p','p','p','p','p'],
+                    ['','','','',''],
+                    ['P','P','P','P','P'],
+                    ['R','N','B','Q','K']
+                ];
+                this.pieces = [];
+                
+                // BPMに応じた敵のベースクールダウンスケール (120BPM基準)
+                const cooldownScale = 120 / gameState.bpm;
+
+                for (let y = 0; y < 5; y++) {
+                    for (let x = 0; x < 5; x++) {
+                        const char = layout[y][x];
+                        if (char) {
+                            const isWhite = char === char.toUpperCase();
+                            const baseCooldown = isWhite ? 0 : ENEMY_BASE_COOLDOWNS[char.toLowerCase()];
+                            const scaledCooldown = baseCooldown * cooldownScale;
+                            
+                            this.pieces.push({
+                                x: x, y: y,
+                                type: char.toUpperCase(),
+                                char: char,
+                                isWhite: isWhite,
+                                cooldown: scaledCooldown,
+                                maxCooldown: scaledCooldown
+                            });
+                        }
+                    }
+                }
+            }
+
+            getPieceAt(x, y) { return this.pieces.find(p => p.x === x && p.y === y); }
+            removePieceAt(x, y) { this.pieces = this.pieces.filter(p => !(p.x === x && p.y === y)); }
+
+            isValidMove(piece, tx, ty) {
+                if (tx < 0 || tx > 4 || ty < 0 || ty > 4) return false;
+                const sx = piece.x, sy = piece.y;
+                if (sx === tx && sy === ty) return false;
+                
+                const target = this.getPieceAt(tx, ty);
+                if (target && target.isWhite === piece.isWhite) return false;
+
+                const dx = tx - sx, dy = ty - sy;
+                const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+                const isClear = (dirX, dirY, dist) => {
+                    for(let i=1; i<dist; i++) if(this.getPieceAt(sx + dirX*i, sy + dirY*i)) return false;
+                    return true;
+                };
+
+                switch (piece.type) {
+                    case 'P':
+                        const dir = piece.isWhite ? -1 : 1;
+                        if (dx === 0 && dy === dir && !target) return true;
+                        if (absDx === 1 && dy === dir && target) return true;
+                        return false;
+                    case 'R':
+                        if (dx !== 0 && dy !== 0) return false;
+                        return isClear(Math.sign(dx), Math.sign(dy), Math.max(absDx, absDy));
+                    case 'B':
+                        if (absDx !== absDy) return false;
+                        return isClear(Math.sign(dx), Math.sign(dy), absDx);
+                    case 'Q':
+                        if (dx !== 0 && dy !== 0 && absDx !== absDy) return false;
+                        return isClear(Math.sign(dx), Math.sign(dy), Math.max(absDx, absDy));
+                    case 'K':
+                        return absDx <= 1 && absDy <= 1;
+                    case 'N':
+                        return (absDx === 1 && absDy === 2) || (absDx === 2 && absDy === 1);
+                }
+                return false;
+            }
+
+            updateAI(deltaTime) {
+                if (gameState.isPaused) return;
+
+                const enemies = this.pieces.filter(p => !p.isWhite);
+                enemies.forEach(enemy => {
+                    // 難易度倍率（gameState.difficulty）を乗算してチャージ速度を増減
+                    enemy.cooldown -= deltaTime * gameState.difficulty;
+                    if (enemy.cooldown <= 0) {
+                        this.executeAIMove(enemy);
+                        enemy.cooldown = enemy.maxCooldown;
+                    }
+                });
+            }
+
+            isThreatened(tx, ty, byWhite, ignorePiece = null) {
+                for (let p of this.pieces) {
+                    if (p.isWhite === byWhite) {
+                        if (p.x === tx && p.y === ty) continue;
+
+                        const dx = tx - p.x, dy = ty - p.y;
+                        const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+                        const isClear = (dirX, dirY, dist) => {
+                            for(let i=1; i<dist; i++) {
+                                const blockingPiece = this.getPieceAt(p.x + dirX*i, p.y + dirY*i);
+                                if (blockingPiece && blockingPiece !== ignorePiece) return false;
+                            }
+                            return true;
+                        };
+
+                        if (p.type === 'P') {
+                            const dir = p.isWhite ? -1 : 1;
+                            if (absDx === 1 && dy === dir) return true;
+                        } else if (p.type === 'R') {
+                            if ((dx === 0 || dy === 0) && isClear(Math.sign(dx), Math.sign(dy), Math.max(absDx, absDy))) return true;
+                        } else if (p.type === 'B') {
+                            if (absDx === absDy && isClear(Math.sign(dx), Math.sign(dy), absDx)) return true;
+                        } else if (p.type === 'Q') {
+                            if ((dx === 0 || dy === 0 || absDx === absDy) && isClear(Math.sign(dx), Math.sign(dy), Math.max(absDx, absDy))) return true;
+                        } else if (p.type === 'K') {
+                            if (absDx <= 1 && absDy <= 1) return true;
+                        } else if (p.type === 'N') {
+                            if ((absDx === 1 && absDy === 2) || (absDx === 2 && absDy === 1)) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            executeAIMove(enemy) {
+                let validMoves = [];
+                for(let y=0; y<5; y++) {
+                    for(let x=0; x<5; x++) {
+                        if (this.isValidMove(enemy, x, y)) {
+                            validMoves.push({x, y, target: this.getPieceAt(x, y)});
+                        }
+                    }
+                }
+                if (validMoves.length === 0) return;
+
+                let bestMove = null;
+                let bestScore = -Infinity;
+
+                for (let m of validMoves) {
+                    let score = 0;
+                    
+                    if (m.target && m.target.isWhite) {
+                        if (m.target.type === 'K') {
+                            score += 10000;
+                        } else {
+                            score += PIECE_COSTS[m.target.type];
+                        }
+                    }
+
+                    const isDanger = this.isThreatened(m.x, m.y, true, enemy);
+                    if (isDanger) score -= (PIECE_COSTS[enemy.type] || 50);
+
+                    if (enemy.type === 'K') {
+                        if (isDanger) score -= 1000;
+                        if (m.y > enemy.y) score -= 30;
+                        if (m.y < enemy.y) score += 10;
+                    } else {
+                        if (m.y > enemy.y && !isDanger) score += 5;
+                    }
+
+                    score += Math.random();
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMove = m;
+                    }
+                }
+
+                if (bestMove) this.doMove(enemy, bestMove.x, bestMove.y);
+            }
+
+            doMove(piece, tx, ty) {
+                const target = this.getPieceAt(tx, ty);
+                if (target) {
+                    this.removePieceAt(tx, ty);
+                    this.sound.playSfx('capture');
+                    if (target.type === 'K') {
+                        endGame(target.isWhite ? "DEFEAT" : "VICTORY");
+                    }
+                }
+                piece.x = tx;
+                piece.y = ty;
+            }
+
+            bindEvents() {
+                const getMousePos = (e) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    return {
+                        x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+                        y: (e.clientY - rect.top) * (this.canvas.height / rect.height)
+                    };
+                };
+
+                this.canvas.addEventListener('mousedown', (e) => {
+                    if (!gameState.isRunning || gameState.isPaused) return;
+                    const pos = getMousePos(e);
+                    const tx = Math.floor(pos.x / this.tileSize);
+                    const ty = Math.floor(pos.y / this.tileSize);
+                    const p = this.getPieceAt(tx, ty);
+                    if (p && p.isWhite) {
+                        this.draggedPiece = p;
+                        this.dragPos = pos;
+                    }
+                });
+
+                this.canvas.addEventListener('mousemove', (e) => {
+                    if (this.draggedPiece && !gameState.isPaused) {
+                        this.dragPos = getMousePos(e);
+                    }
+                });
+
+                window.addEventListener('mouseup', (e) => {
+                    if (!this.draggedPiece) return;
+                    
+                    if (gameState.isPaused || !gameState.isRunning) {
+                        this.draggedPiece = null;
+                        return;
+                    }
+
+                    const rect = this.canvas.getBoundingClientRect();
+                    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                        const pos = getMousePos(e);
+                        const tx = Math.floor(pos.x / this.tileSize);
+                        const ty = Math.floor(pos.y / this.tileSize);
+                        const cost = PIECE_COSTS[this.draggedPiece.type];
+
+                        if (this.isValidMove(this.draggedPiece, tx, ty)) {
+                            if (gameState.ap >= cost) {
+                                gameState.ap -= cost;
+                                rhythmSys.updateUI();
+                                this.doMove(this.draggedPiece, tx, ty);
+                            } else {
+                                this.sound.playSfx('error');
+                            }
+                        }
+                    }
+                    this.draggedPiece = null;
+                });
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                for (let y = 0; y < 5; y++) {
+                    for (let x = 0; x < 5; x++) {
+                        this.ctx.fillStyle = (x + y) % 2 === 0 ? '#0f172a' : '#020617';
+                        this.ctx.fillRect(x * this.tileSize, y * this.tileSize, this.tileSize, this.tileSize);
+                        
+                        if (this.draggedPiece && this.isValidMove(this.draggedPiece, x, y)) {
+                            this.ctx.fillStyle = 'rgba(16, 185, 129, 0.2)';
+                            this.ctx.fillRect(x * this.tileSize, y * this.tileSize, this.tileSize, this.tileSize);
+                        }
+                    }
+                }
+
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.pieces.forEach(p => {
+                    if (p !== this.draggedPiece) {
+                        this.drawPiece(p, p.x * this.tileSize + 50, p.y * this.tileSize + 50);
+                    }
+                });
+
+                if (this.draggedPiece) {
+                    this.drawPiece(this.draggedPiece, this.dragPos.x, this.dragPos.y, true);
+                }
+            }
+
+            drawPiece(p, cx, cy, dragging=false) {
+                this.ctx.shadowBlur = dragging ? 20 : 0;
+                this.ctx.shadowColor = p.isWhite ? '#10b981' : '#f43f5e';
+                this.ctx.font = '60px Arial';
+                this.ctx.fillStyle = p.isWhite ? '#a7f3d0' : '#fecdd3';
+                this.ctx.fillText(UNICODE_PIECES[p.char], cx, cy + 5);
+                this.ctx.shadowBlur = 0;
+
+                this.ctx.font = 'bold 12px Orbitron';
+                if (p.isWhite) {
+                    const cost = PIECE_COSTS[p.type];
+                    this.ctx.fillStyle = gameState.ap >= cost ? '#10b981' : '#475569';
+                    this.ctx.fillText(`AP ${cost}`, cx, cy - 35);
+                } else {
+                    const pct = 1.0 - (p.cooldown / p.maxCooldown);
+                    this.ctx.beginPath();
+                    this.ctx.arc(cx, cy, 38, -Math.PI/2, -Math.PI/2 + (Math.PI * 2 * pct));
+                    this.ctx.strokeStyle = '#f43f5e';
+                    this.ctx.lineWidth = 4;
+                    this.ctx.lineCap = 'round';
+                    this.ctx.stroke();
+                }
+            }
+        }
+
+        let soundMgr = new SoundManager();
+        let rhythmSys, chessSys;
+        let lastTime = 0, animId = null;
+
+        function initGame() {
+            let bpmStr = document.getElementById('bpm-select').value;
+            let bpm = 120;
+            
+            if (bpmStr === 'custom') {
+                let customVal = parseInt(document.getElementById('custom-bpm-input').value);
+                if (isNaN(customVal)) customVal = 120;
+                bpm = Math.max(40, Math.min(300, customVal));
+            } else {
+                bpm = parseInt(bpmStr);
+            }
+            
+            gameState.bpm = bpm;
+            // 難易度倍率の取得（0.8, 1.0, 1.2）
+            gameState.difficulty = parseFloat(document.getElementById('difficulty-select').value);
+            
+            gameState.isRunning = true;
+            gameState.isPaused = false;
+            gameState.ap = 0;
+            gameState.combo = 0;
+            
+            document.getElementById('title-overlay').classList.add('hidden');
+            document.getElementById('pause-overlay').classList.add('hidden');
+            document.getElementById('result-overlay').classList.add('hidden');
+            
+            soundMgr.init(bpm);
+            rhythmSys = new RhythmSystem(document.getElementById('rhythmCanvas'), soundMgr);
+            chessSys = new ChessSystem(document.getElementById('chessCanvas'), soundMgr);
+            
+            chessSys.initBoard();
+            rhythmSys.updateUI();
+
+            lastTime = Date.now();
+            if (animId) cancelAnimationFrame(animId);
+            gameLoop();
+        }
+
+        function togglePause() {
+            if (!gameState.isRunning) return;
+            
+            gameState.isPaused = !gameState.isPaused;
+            const overlay = document.getElementById('pause-overlay');
+            
+            if (gameState.isPaused) {
+                soundMgr.suspend();
+                overlay.classList.remove('hidden');
+            } else {
+                overlay.classList.add('hidden');
+                soundMgr.resume();
+                lastTime = Date.now();
+            }
+        }
+
+        function endGame(resultStr) {
+            gameState.isRunning = false;
+            soundMgr.suspend();
+            
+            const overlay = document.getElementById('result-overlay');
+            const titleEl = document.getElementById('result-title');
+            
+            if (resultStr === "VICTORY") {
+                titleEl.innerText = "MISSION CLEAR";
+                titleEl.className = "text-6xl font-black mb-6 neon-text-green";
+            } else {
+                titleEl.innerText = "SYSTEM FAILURE";
+                titleEl.className = "text-6xl font-black mb-6 neon-text-red";
+            }
+            
+            overlay.classList.remove('hidden');
+        }
+
+        function returnToTitle() {
+            gameState.isRunning = false;
+            gameState.isPaused = false;
+            soundMgr.suspend();
+            
+            document.getElementById('pause-overlay').classList.add('hidden');
+            document.getElementById('result-overlay').classList.add('hidden');
+            document.getElementById('title-overlay').classList.remove('hidden');
+        }
+
+        function gameLoop() {
+            animId = requestAnimationFrame(gameLoop);
+            
+            if (!gameState.isRunning || gameState.isPaused) {
+                lastTime = Date.now();
+                return;
+            }
+            
+            const now = Date.now();
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            soundMgr.scheduleBeats((t) => rhythmSys.scheduleNote(t));
+            
+            rhythmSys.update(dt);
+            rhythmSys.draw();
+            
+            chessSys.updateAI(dt);
+            chessSys.draw();
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                rhythmSys.handleInput();
+            }
+            if (e.code === 'Escape') {
+                togglePause();
+            }
+        });
+
+        document.getElementById('start-btn').addEventListener('click', initGame);
+        document.getElementById('resume-btn').addEventListener('click', togglePause);
+        document.getElementById('retry-btn').addEventListener('click', initGame);
+        document.getElementById('title-btn').addEventListener('click', returnToTitle);
+        document.getElementById('result-title-btn').addEventListener('click', returnToTitle);
+
+        document.getElementById('bpm-select').addEventListener('change', (e) => {
+            const customInput = document.getElementById('custom-bpm-input');
+            if (e.target.value === 'custom') {
+                customInput.classList.remove('hidden');
+                customInput.focus();
+            } else {
+                customInput.classList.add('hidden');
+            }
+        });
+
+        const initCanvas = document.getElementById('chessCanvas').getContext('2d');
+        initCanvas.fillStyle = '#020617';
+        initCanvas.fillRect(0, 0, 500, 500);
+        
+    </script>
+</body>
+</html>
